@@ -1,0 +1,6 @@
+- resnet A (Conv/FC, resnet)
+- resnet A (Conv/FC, resnet)
+- mnist_fc (FC)
+- oval21 (Conv/FC, FF)
+- Cifar 2020    
+- cifar biasfild (Conv)
