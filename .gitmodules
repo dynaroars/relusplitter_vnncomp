@@ -1,0 +1,3 @@
+[submodule "libs/auto_LiRPA"]
+	path = libs/auto_LiRPA
+	url = https://github.com/Verified-Intelligence/auto_LiRPA.git

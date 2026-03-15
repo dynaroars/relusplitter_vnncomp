@@ -1,0 +1,1 @@
+TOOL_NAME = "RSplitter_Anywhere"
