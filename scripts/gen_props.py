@@ -31,7 +31,7 @@ DESTAB_PERCENTS   = [0.2, 0.4, 0.6, 0.8, 1.0]   # fractions of neurons to destab
 SEED_TIMEOUT      = 60        # timeout (s) written for seed instances
 SPLIT_TIMEOUT_RATIO = 3       # generated instance timeout = SEED_TIMEOUT * ratio
 MODE              = "gemm"    # "gemm" for FC networks, "conv" for CNNs
-MAX_MP_COUNT      = 10
+MAX_MP_COUNT      = 1
 MAX_RETRY         = 5
 # ---------------------------------------------------------------------------
 
