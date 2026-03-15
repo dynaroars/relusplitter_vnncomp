@@ -15,7 +15,7 @@ if not Path(".envs/ReluSplitter").exists():
 _TOOL_ROOT = Path(__file__).resolve().parent
 _LIB_PATH  = _TOOL_ROOT / "libs"
 os.environ["PYTHONPATH"] = os.pathsep.join(
-    filter(None, [str(_LIB_PATH), os.environ.get("PYTHONPATH", "")])
+    filter(None, [str(_LIB_PATH), str(_TOOL_ROOT), os.environ.get("PYTHONPATH", "")])
 )
 sys.path.insert(0, str(_LIB_PATH))
 
