@@ -4,7 +4,6 @@ import random
 import subprocess
 import csv
 from pathlib import Path
-from multiprocessing import Pool, cpu_count
 
 from relu_splitter.experiment_utils import get_layer_sizes
 
@@ -31,7 +30,6 @@ DESTAB_PERCENTS   = [0.2, 0.4, 0.6, 0.8, 1.0]   # fractions of neurons to destab
 SEED_TIMEOUT      = 60        # timeout (s) written for seed instances
 SPLIT_TIMEOUT_RATIO = 3       # generated instance timeout = SEED_TIMEOUT * ratio
 MODE              = "gemm"    # "gemm" for FC networks, "conv" for CNNs
-MAX_MP_COUNT      = 1
 MAX_RETRY         = 5
 # ---------------------------------------------------------------------------
 
@@ -82,25 +80,53 @@ def load_seed_instances(benchmark_dir: Path) -> list[tuple[Path, Path]]:
 
 
 def run_splitter(onnx: Path, vnnlib: Path, output: Path, split_idx: int, n: int, seed: int) -> bool:
-    """Call anywhere_main.py split as a subprocess. Returns True on success."""
-    cmd = [
-        str(PYTHON_EXE), str(ANYWHERE_MAIN), "split",
-        "--net",       str(onnx),
-        "--spec",      str(vnnlib),
-        "--output",    str(output),
-        "--mode",      MODE,
-        "--split_idx", str(split_idx),
-        "-n",          str(n),
-        "--seed",      str(seed),
-        "--output_ir_version", "8",
-    ]
-    sp = subprocess.run(cmd, capture_output=True, text=True)
-    if sp.returncode != 0:
-        print(f"[FAIL] {' '.join(cmd)}")
-        print(sp.stdout[-2000:])
-        print(sp.stderr[-2000:])
+    """Run split in-process (avoids per-call Python startup overhead). Returns True on success."""
+    import torch
+    from relu_splitter.anywhere import ReluSplitter_Anywhere
+    from relu_splitter.utils.onnx_utils import check_models_closeness
+
+    default_device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    try:
+        import logging
+        from relu_splitter.utils.logger import default_logger
+        default_logger.setLevel(logging.CRITICAL)
+
+        rsa = ReluSplitter_Anywhere(str(onnx), str(vnnlib))
+        conf = {
+            "seed": seed,
+            "split_activation": "relu",
+            "n_splits": n,
+            "create_baseline": False,
+            "candidiate_strat": "random",
+            "bounding_method_tight": "backward",
+            "bounding_method_loose": "ibp",
+            "param_conf": {
+                "gemm_tau_strat": "random",
+                "stable_tau_strat": "random",
+                "stable_tau_margin": (5.0, 15.0),
+                "cap_tau": 50.0,
+                "split_scale_strat": "fixed",
+                "fixed_scales": (1.0, -1.0),
+                "random_scale_range": (0.1, 5.0),
+            },
+            "additional_activation_conf": {
+                "leakyrelu_alpha": 0.01,
+                "prelu_slope_range": (0.01, 0.25),
+            },
+        }
+        new_model, baseline = rsa.split(MODE, split_idx, conf)
+        new_model.save(output, ir_version=8)
+        closeness = check_models_closeness(
+            rsa.model, [new_model, baseline], rsa.input_shape,
+            device=default_device, n=100, atol=5e-5, rtol=5e-5,
+        )
+        assert closeness[0][0] and closeness[1][0], "Closeness check failed"
+        return True
+    except Exception as e:
+        print(f"[FAIL] {onnx.stem} n={n} seed={seed}: {e}")
+        if output.exists():
+            output.unlink()
         return False
-    return True
 
 
 def generate_for_instance(args):
@@ -120,13 +146,11 @@ def generate_for_instance(args):
         for pct, cnt in zip(DESTAB_PERCENTS, cnts)
     ]
 
-    # Generate all percentages in parallel within this instance
     params = [
         (onnx, vnnlib, fname, layer_idx, cnt, seed)
         for fname, cnt in zip(out_fnames, cnts)
     ]
-    with Pool(processes=min(len(params), MAX_MP_COUNT)) as pool:
-        results = pool.starmap(run_splitter, params)
+    results = [run_splitter(*p) for p in params]
 
     retry = 0
     while not all(results):
@@ -140,8 +164,7 @@ def generate_for_instance(args):
         seed += 1
         print(f"  Retry {retry} for {onnx.stem} (new seed={seed})")
         params = [(onnx, vnnlib, fname, layer_idx, cnt, seed) for fname, cnt in zip(out_fnames, cnts)]
-        with Pool(processes=min(len(params), MAX_MP_COUNT)) as pool:
-            results = pool.starmap(run_splitter, params)
+        results = [run_splitter(*p) for p in params]
 
     return list(zip(out_fnames, [vnnlib] * len(out_fnames)))
 
